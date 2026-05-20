@@ -4,16 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\Aduan;
 use Illuminate\Http\Request;
-
+use App\Models\Anggota;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 class AdminController extends Controller
 {
-    /**
-     * Halaman Utama Admin (Home)
-     * Menampilkan statistik ringkas dan 3 aduan terbaru
-     */
     public function home()
     {
-        // 1. Ambil data statistik untuk dikirim ke view home
         $data = [
             'totalAduan' => Aduan::count(),
             'menunggu'   => Aduan::where('id_status', 1)->count(),
@@ -28,25 +25,21 @@ class AdminController extends Controller
 
         return view('admin.home', $data);
     }
-    /**
-     * Halaman Tabel Dashboard
-     * Dilengkapi Search, Filter, dan Statistik lengkap
-     */
    public function index(Request $request)
 {
-    // Menggunakan join secara eksplisit seringkali lebih stabil untuk pencarian kompleks
+    if (!Auth::check() || Auth::user()->role !== 'admin') {
+    return redirect()->route('user.home')->with('error', 'Anda tidak memiliki hak akses!');
+}
     $query = Aduan::query()
         ->select('aduan.*')
         ->join('anggota', 'aduan.id_anggota', '=', 'anggota.id_anggota')
         ->join('kategori', 'aduan.id_kategori', '=', 'kategori.id_kategori')
         ->with(['anggota', 'kategori', 'status']);
 
-    // 1. Filter Status
     if ($request->filled('status')) {
         $query->where('aduan.id_status', $request->status);
     }
 
-    // 2. Search (Menggunakan pencarian langsung ke tabel yang sudah di-join)
     if ($request->filled('search')) {
         $search = $request->search;
         $query->where(function($q) use ($search) {
@@ -57,10 +50,8 @@ class AdminController extends Controller
         });
     }
 
-    // Eksekusi Query
     $semuaAduan = $query->latest('aduan.waktu_aduan')->get();
 
-    // Statistik (Dihitung terpisah agar tidak terpengaruh join/filter pencarian)
     $totalAduan = Aduan::count();
     $menunggu   = Aduan::where('id_status', 1)->count();
     $diproses   = Aduan::where('id_status', 2)->count();
@@ -72,10 +63,6 @@ class AdminController extends Controller
     ));
 }
 
-    /**
-     * Update Status via AJAX 
-     * Agar status langsung tersimpan saat admin mengubah dropdown
-     */
     public function updateStatus(Request $request, $id)
     {
         $aduan = Aduan::findOrFail($id);
@@ -88,10 +75,6 @@ class AdminController extends Controller
         ]);
     }
 
-    /**
-     * Menghapus aduan
-     * Menghapus data permanen di DB saat ikon tong sampah diklik
-     */
     public function destroy($id)
     {
         $aduan = Aduan::findOrFail($id);
@@ -99,4 +82,31 @@ class AdminController extends Controller
 
         return back()->with('success', 'Aduan berhasil dihapus secara permanen.');
     }
+    // Tambahkan method ini di dalam AdminController.php
+public function anggota()
+{
+    $anggota = \App\Models\Anggota::with('user')->get(); 
+
+    return view('admin.anggota', compact('anggota'));
+}
+public function show($id)
+    {
+        $aduan = Aduan::with(['status', 'kategori', 'anggota'])->findOrFail($id);
+        
+        return view('admin.detail_aduan', compact('aduan'));
+    }
+    public function destroyAnggota($id)
+{
+    $anggota = Anggota::findOrFail($id);
+    
+    $id_user = $anggota->id_user;
+
+    $anggota->delete();
+
+    if ($id_user) {
+        User::where('id_user', $id_user)->delete();
+    }
+
+    return redirect()->route('admin.anggota')->with('success', 'Data anggota berhasil dihapus.');
+}
 }
